@@ -77,6 +77,7 @@
   --bs-link-hover-color: #be0761;
   --bs-code-color: #ee0979;
   --bs-highlight-bg: #fff3cd;
+
 }
 
 *,
@@ -10919,3 +10920,4 @@ header.masthead .bg-circle-4 {
     font-size: 4rem;
   }
 }
+
