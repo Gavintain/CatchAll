@@ -17,19 +17,26 @@ def database_initialize(db_info):
         conn = psycopg2.connect(**db_info)
         cursor = conn.cursor()
 
+        cursor.execute("""Drop TABLE IF EXISTS samplemodel_metadata_table CASCADE;""")
         cursor.execute("""Drop TABLE IF EXISTS model_metadata_table CASCADE;""")
         cursor.execute("""Drop TABLE IF EXISTS aihub_img_table CASCADE;""")
         cursor.execute("""Drop TABLE IF EXISTS aihub_annotation_table CASCADE;""")
 
+        cursor.execute("""CREATE TABLE IF NOT EXISTS samplemodel_metadata_table (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(255) UNIQUE,
+                        size_mb FLOAT,
+                        format VARCHAR(255)
+                        );""")
         cursor.execute("""CREATE TABLE IF NOT EXISTS model_metadata_table (
                         id SERIAL PRIMARY KEY,
-                        name VARCHAR(255),
+                        name VARCHAR(255) UNIQUE,
                         size_mb FLOAT,
                         format VARCHAR(255)
                         );""")
         cursor.execute("""CREATE TABLE IF NOT EXISTS aihub_img_table (
                         id SERIAL PRIMARY KEY,
-                        name VARCHAR(255),
+                        name VARCHAR(255) UNIQUE,
                         size_mb FLOAT,
                         type VARCHAR(255),
                         split VARCHAR(255),
@@ -42,7 +49,7 @@ def database_initialize(db_info):
                         category_str VARCHAR(255),
                         bboxs FLOAT[],
                         segmentation FLOAT[],
-                        is_crowd int
+                        is_crowd INT
                         );""")
 
         conn.commit()
@@ -52,8 +59,8 @@ def database_initialize(db_info):
         print("while db_initialization, got ", e)
 
 def sample_data_initialize():
-    image_path = 'data/image/'
-    data_path = 'data/sample_data.json'
+    image_path = 'data/sample/image/'
+    data_path = 'data/sample/sample_data.json'
 
     classes = ['Motorcycle_Pedestrian Road Violation', 'Motorcycle_No Helmet', 'Motorcycle_Jaywalking', 
     'Motorcycle_Signal Violation', 'Motorcycle_Stop Line Violation', 'Motorcycle_Crosswalk Violation', 
@@ -120,40 +127,31 @@ def sample_data_initialize():
         print("while sample_data_loading, got ",e)
 
 def sample_model_initialize():
-    folder_path = 'data/model/'
-    modellist = ['yolov8.pt']
-
-    classes = ['Motorcycle_Pedestrian Road Violation', 'Motorcycle_No Helmet', 'Motorcycle_Jaywalking', 
-    'Motorcycle_Signal Violation', 'Motorcycle_Stop Line Violation', 'Motorcycle_Crosswalk Violation', 
-    'Bicycle_Pedestrian Road Violation', 'Bicycle_No Helmet', 'Bicycle_Jaywalking', 
-    'Bicycle_Signal Violation', 'Bicycle_Stop Line Violation', 'Bicycle_Crosswalk Violation', 
-    'Kickboard_Pedestrian Road Violation', 'Kickboard_No Helmet', 'Kickboard_Jaywalking', 
-    'Kickboard_Signal Violation','Kickboard_Crosswalk Violation', 'Kickboard_Passenger Violation']
-    
+    folder_path = 'data/sample/model/'
+    modellist = os.listdir('data/sample/model')
 
     try:
-        for i,filename in enumerate(modellist):
-            id = i
+        for filename in modellist:
             name = filename.split('.')[0]
-            size_mb = round((os.path.getsize(folder_path+filename))/(1024*1000),3)
+            size_mb = round((os.path.getsize(folder_path+filename))/(1024*1024),3)
             format = filename.split('.')[1]
         
             conn = psycopg2.connect(**app.db_info)
             cursor = conn.cursor()
             query1 = """
-                    INSERT INTO model_metadata_table (id,name,size_mb,format) 
-                    VALUES (%s,%s,%s,%s);
+                    INSERT INTO samplemodel_metadata_table (name,size_mb,format) 
+                    VALUES (%s,%s,%s);
                     """
-            cursor.execute(query1,(id,name,size_mb,format))
+            cursor.execute(query1,(name,size_mb,format))
        
         conn.commit()
 
-        # 데이터베이스 데이터 저장 확인
-        query = "SELECT * FROM model_metadata_table;"
-        cursor.execute(query)
-        result = cursor.fetchall()
-        for row in result:
-            print(row)
+        # # 데이터베이스 데이터 저장 확인
+        # query = "SELECT * FROM samplemodel_metadata_table;"
+        # cursor.execute(query)
+        # result = cursor.fetchall()
+        # for row in result:
+        #     print(row)
 
         conn.close()
         print('sample_model_loading successful')
@@ -171,6 +169,49 @@ def app_initialize(db_info):
     # except Exception as e:
         # print(e)
 
+def uploading_model(uploaded_model):
+    try:
+        model_data = uploaded_model.read()  # 파일 내용을 읽어옴
+        model_size = round(len(model_data)/(1024*1024),2)  # 파일 크기를 바이트로 읽고 메가바이트로 변환
+        model_filename = uploaded_model.filename
+        model_name = model_filename.split('.')[0]
+        model_filetype = model_filename.split('.')[1]
+
+        if model_filetype == 'pt':
+            with open(f"data/uploaded/{uploaded_model.filename}", "wb") as f:
+                f.write(model_data)
+            f.close()
+        else:
+            raise('filetype:' + model_filetype +' is not supported')
+    except Exception as e:
+        raise(e)
+    
+    ####### saving model metadata to database
+    try:
+        conn = psycopg2.connect(**app.db_info)
+        cursor = conn.cursor()
+        query = """
+                INSERT INTO model_metadata_table (name,size_mb,format) 
+                VALUES (%s,%s,%s);
+                """
+        cursor.execute(query,(model_name,model_size,model_filetype))
+        conn.commit()
+        print('uploading model success')
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise(e)
+    
+def load_uploaded_model(model_name,file_format):
+    model = torch.load(f"data/uploaded/model/{model_name+'.'+ file_format}")
+    return model
+    
+def load_sample_model(model_name,file_format):
+    model = torch.load(f"data/sample/model/{model_name+'.'+ file_format}")
+    return model
+
+def test_model(model):
+    pass
 
 
 # main page
@@ -196,59 +237,23 @@ def modeltesting():
     
 @app.route('/modelupload', methods=['POST'])
 def model_upload():
-    # image = request.files['image']
+    uploaded_model = request.files['model']
     try:
-        uploaded_model = request.files['model']
-
-        model_data = uploaded_model.read()  # 파일 내용을 읽어옴
-        model_size = round(len(model_data)/(1024*1024),2)  # 파일 크기를 바이트로 읽고 메가바이트로 변환
-        model_filename = uploaded_model.filename
-        model_name = model_filename.split('.')[0]
-        model_filetype = model_filename.split('.')[1]
-        print(model_size)
-        if model_filetype == 'pt':
-            with open(f"models/temp/{uploaded_model.filename}", "wb") as f:
-                f.write(model_data)
-
-            model = torch.load(f"models/temp/{uploaded_model.filename}")
-
-            ####### model testing section
-
-            ##############################################
-
-            ####### saving model performance to database
-            conn = psycopg2.connect(**DB_postgresql)
-            cursor = conn.cursor()
-
-            # 모델 데이터를 BLOB로 데이터베이스에 저장
-            # cursor.execute('INSERT INTO uploads (image, model) VALUES (%s, %s)',
-            #                 (psycopg2.Binary(image.read()), psycopg2.Binary(model.read())))
-
-            # cursor.execute('INSERT INTO uploads (image) VALUES (%s)',
-            #                 (psycopg2.Binary(image.read()),))
-
-
-            conn.commit()
-            conn.close()
-            print('success')
-            ##############################################
-
-            del(model)
-        else:
-            raise('filetype is not supported')
+        uploading_model(uploaded_model)
+    except psycopg2.IntegrityError as e:
+        print('중복된 모델명이 데이터베이스에 존재합니다.')
     except Exception as e: 
-        print(f"Error: {e}")
-
-    try:
-        os.remove(f"models/temp/{uploaded_model.filename}")
-    except:
-        pass
-
+        print('while uploading model, got ',e)
+    finally:
+        try:
+            os.remove(f"data/uploaded/{uploaded_model.filename}")
+        except:
+            pass
 
     ####### showing result on the page
 
     ##############################################
-    return redirect(url_for('modeltesting'))
+        return redirect(url_for('modeltesting'))
     
 
 # main
