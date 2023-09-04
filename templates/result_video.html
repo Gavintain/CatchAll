@@ -15,7 +15,7 @@
           <div class="result-subtitle">Checkout The Result</div>
           <p class="resul-title">교통법규를 위반한 운전자가 있는지 확인해보세요</p>
           <div class="screen">
-            <video id="result_video" video width="640" height="360" controls>
+            <video id="result_video" width="640" height="360" controls>
               <source src="{{ url_for('static', filename=output_path) }}" type="video/mp4">
             </video>
             <button id="playButton">Play</button>
@@ -47,10 +47,11 @@
         var video = document.getElementById('result_video');
         const playButton = document.getElementById('playButton');
         const pauseButton = document.getElementById("pauseButton");
+    
         playButton.addEventListener("click", function () {
           video.play();
         });
-
+    
         pauseButton.addEventListener("click", function () {
           video.pause();
         });

@@ -268,13 +268,19 @@
 
   #playButton {
     left:8.5%;
-    top:50%
+    top:50%;
     background-color: #ccc;
     border-radius: 5px;
     position: relative;
   }
 
   #pauseButton {
+    left:8.5%;
+    background-color: #ccc;
+    border-radius: 5px;
+    position: relative;
+  }
+  #loadButton{
     left:8.5%;
     background-color: #ccc;
     border-radius: 5px;

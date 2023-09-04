@@ -27,12 +27,19 @@
   overflow: hidden;
 }
 .copyright {
-  color: #3e3e3e;
-  text-align: left;
-  font: 400 0.9375rem "BM DoHyeon", sans-serif;
   position: relative;
+  width: fit-content;
+  margin-top: -1px;
+  font-family: "BM DoHyeon-Regular", Helvetica;
+  font-weight: 400;
+  color: #3d3d3d;
+  font-size: 15px;
+  letter-spacing: 5;
+  line-height: normal;
+  white-space: nowrap;
 }
 .service-expectations {
+  font: 400 1.875rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   inset: 0;
 }
@@ -227,7 +234,7 @@
   position: absolute;
   left: 19.56125rem;
   top: 176.25rem;
-  width: 15.5625rem;
+  width: 16.5625rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -303,7 +310,7 @@
 .expect7 {
   color: #ffffff;
   text-align: center;
-  font: 400 1.875rem "BM DoHyeon", sans-serif;
+  font: 400 1.875rem "BM DoHyeon-Regular", Helvetica;
   position: relative;
   left: 40rem;
   top: 80rem;
@@ -314,6 +321,7 @@
   width: 23.9375rem;
   height: 5.0625rem;
   position: static;
+  font-family: "BM DoHyeon-Regular", Helvetica;
 }
 .group-47 {
   width: 23.9375rem;
@@ -323,7 +331,7 @@
 .service-expectations2 {
   color: #26a6fe;
   text-align: left;
-  font: 400 1.5625rem "BM DoHyeon", sans-serif;
+  font: 400 1.5625rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   left: 36.5rem;
   top: 119.8125rem;
@@ -331,7 +339,7 @@
 .expect-context {
   color: #000000;
   text-align: left;
-  font: 400 1.875rem "BM DoHyeon", sans-serif;
+  font: 400 1.875rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   left: 33rem;
   top: 122.5625rem;
@@ -443,21 +451,21 @@
 .newspaper .news-context {
   color: #000000;
   text-align: center;
-  font: 400 1.875rem "BM DoHyeon", sans-serif;
+  font: 400 1.875rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   left: 22.875rem;
   top: 78.375rem;
-  width: 44.25rem;
+  width: 45.25rem;
   height: 2.125rem;
 }
 .pm {
   color: #000000;
   text-align: center;
-  font: 400 1.25rem "BM DoHyeon", sans-serif;
+  font: 400 1.25rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   left: 37.125rem;
   top: 81rem;
-  width: 16.1875rem;
+  width: 17.1875rem;
   height: 1.4375rem;
 }
 .service .header {
@@ -477,10 +485,11 @@
   height: 5rem;
   position: static;
 }
+
 .header .the-problem {
   color: #26a6fe;
   text-align: left;
-  font: 400 1.5625rem "BM DoHyeon", sans-serif;
+  font: 400 1.5625rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   left: 39.9375rem;
   top: 9.75rem;
@@ -488,7 +497,7 @@
 .header .problem-text {
   color: #000000;
   text-align: left;
-  font: 400 1.875rem "BM DoHyeon", sans-serif;
+  font: 400 1.875rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   left: 30.0625rem;
   top: 12.4375rem;
@@ -534,7 +543,7 @@
 .data {
   color: #404040;
   text-align: left;
-  font: var(--basic, 400 1.25rem "BM DoHyeon", sans-serif);
+  font: var(--basic, 400 1.25rem "BM DoHyeon-Regular", Helvetica);
   position: absolute;
   left: 61.5625rem;
   top: 1.5625rem;
@@ -542,7 +551,7 @@
 .simulate {
   color: #404040;
   text-align: left;
-  font: var(--basic, 400 1.25rem "BM DoHyeon", sans-serif);
+  font: var(--basic, 400 1.25rem "BM DoHyeon-Regular", Helvetica);
   position: absolute;
   left: 67.4375rem;
   top: 1.5625rem;
@@ -550,7 +559,7 @@
 .service2 {
   color: #404040;
   text-align: left;
-  font: 400 1.25rem "BM DoHyeon", sans-serif;
+  font: 400 1.25rem "BM DoHyeon-Regular", Helvetica;;
   position: absolute;
   left: 53.6875rem;
   top: 1.5625rem;
@@ -565,7 +574,7 @@
 .home {
   color: #404040;
   text-align: left;
-  font: 400 1.25rem "BM DoHyeon", sans-serif;
+  font: 400 1.25rem "BM DoHyeon-Regular", Helvetica;
   position: absolute;
   left: 12.1875rem;
   top: 1.5625rem;

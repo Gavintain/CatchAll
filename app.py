@@ -1,13 +1,11 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify,send_file, send_from_directory, session, current_app, Response
-from flask_session import Session
+from flask import Flask, render_template, request, redirect, url_for, jsonify,send_file, send_from_directory, session, current_app, Response, make_response
 from flask_redis import FlaskRedis
-from gunicorn.app.base import Application
+from flask_cors import CORS
+import redis
+# from gunicorn.app.base import Application
 from werkzeug.utils import secure_filename
 from werkzeug.local import LocalProxy, LocalStack
 import psycopg2
-import torch
-import ultralytics
-from ultralytics import YOLO
 import os,io,threading,time,random
 import json
 import PIL
@@ -17,13 +15,14 @@ import cv2.dnn
 import numpy as np
 from matplotlib import pyplot as plt
 import base64
-import redis
 
+import torch
+import ultralytics
+from ultralytics import YOLO
 
 
 ERRFILESIZE = "파일크기가 200MB보다 작아야합니다."
 ERRFILEFORMAT = "가능한 파일 포멧은 png,jpg,mp4 입니다."
-
 
 app = Flask(__name__)
 app.secret_key = 'server_admin'
@@ -44,6 +43,9 @@ redis_host = 'localhost'
 redis_port = 6379
 redis_client = redis.StrictRedis(host=redis_host, port=redis_port, decode_responses=True)
 
+# flask-cors
+CORS(app)
+
 # @app.before_request
 # def before_request():
 #     if 'progress' not in session:
@@ -58,12 +60,12 @@ def set_progress(progress):
 def get_progress():
     return int(redis_client.get('progress'))
 
-class FlaskGunicornApp(Application):
-    def init(self, parser, opts, args):
-        pass
+# class FlaskGunicornApp(Application):
+#     def init(self, parser, opts, args):
+#         pass
 
-    def load(self):
-        return app
+#     def load(self):
+#         return app
 
 def database_initialize(db_info):
     try:
@@ -326,19 +328,19 @@ def uploading_data(uploaded_data):
     finally:
         return data_filename,data_path,data_format
 
-def load_uploaded_model(model_name,file_format):
-    model = torch.load(f"datasets/uploaded/model/{model_name+'.'+ file_format}")
-    return model
+# def load_uploaded_model(model_name,file_format):
+#     model = torch.load(f"datasets/uploaded/model/{model_name+'.'+ file_format}")
+#     return model
     
-def load_sample_model(model_name,file_format):
-    model = torch.load(f"datasets/sample/model/{model_name+'.'+ file_format}")
-    return model
+# def load_sample_model(model_name,file_format):
+#     model = torch.load(f"datasets/sample/model/{model_name+'.'+ file_format}")
+#     return model
 
-def test_YOLO_model(model_name):
-    path = 'datasets/sample/model/' + model_name + '.pt'
-    model = YOLO(path)
-    result = model.val(data = "datasets/sample/yolo_train.yaml")
-    # return result
+# def test_YOLO_model(model_name):
+#     path = 'datasets/sample/model/' + model_name + '.pt'
+#     model = YOLO(path)
+#     result = model.val(data = "datasets/sample/yolo_train.yaml")
+#     # return result
 
 # ONNX모델과 이미지를 받아서 추론하는 함수
 def Yolo_onnx_image_inference(model:cv2.dnn.Net, img, conf=0.25, nms_th=0.8):
@@ -453,7 +455,7 @@ def predict_video_with_onnx(video_path,model_name):
 
             # cv2.namedWindow('YOLOv8m Tracking', cv2.WINDOW_NORMAL)
             # cv2.imshow("YOLOv8m Tracking", results[..., ::-1])  # RGB => BGR
-            print(f'추론시간 {infer_time}ms')
+            # print(f'추론시간 {infer_time}ms')
 
             # 결과 프레임을 동영상으로 저장
             output_video.write(results)
@@ -517,7 +519,7 @@ def thread_predict_video_with_onnx(file_name,video_path,model_name):
 
             # cv2.namedWindow('YOLOv8m Tracking', cv2.WINDOW_NORMAL)
             # cv2.imshow("YOLOv8m Tracking", results[..., ::-1])  # RGB => BGR
-            print(f'추론시간 {infer_time}ms')
+            # print(f'추론시간 {infer_time}ms')
 
             # 결과 프레임을 동영상으로 저장
             output_video.write(results)
@@ -553,7 +555,7 @@ def thread_predict_video_with_yolo_pt(file_name,video_path,model_name):
 
     progress = 10
     set_progress(progress)
-    detection_results = model.predict(source=video_path)
+    detection_results = model.predict(source=video_path,device = 'cpu')
     # img_num = len(detection_results)
     # count = 10
     # progress = int(count/(img_num+11))
@@ -637,7 +639,6 @@ def model_simulate():
             filename, filepath, file_format = uploading_data(uploaded_data)
         except Exception as e:
             return render_template('error_handle.html', message=str(e)) 
-        print('simulate')
         return redirect(url_for('loading',filename = filename , filepath = filepath, file_format = file_format,init='0'))
     return render_template('simulate.html')
 
@@ -654,18 +655,37 @@ def taskdata():
     return render_template('old/taskdata.html')
 
 
+# @app.route('/result')
+# def result():
+#     file_format = request.args.get('file_format')
+#     output_path = request.args.get('output_path')
+#     response = make_response(send_from_directory('static', output_path))
+#     response.headers['Access-Control-Allow-Origin'] = '*'
+#     if file_format == 'image':
+#         # 이미지 결과 로직 및 템플릿 렌더링
+#         return render_template('result_image.html',output_path = output_path)
+#     elif file_format == 'video':
+#         # 비디오 결과 로직 및 템플릿 렌더링
+#         return render_template('result_video.html',output_path = output_path)
+#     else:
+#         return render_template('error_handle.html', message='Invalid file type')
+
 @app.route('/result')
 def result():
     file_format = request.args.get('file_format')
     output_path = request.args.get('output_path')
+    response = make_response(send_from_directory('static', output_path))
+    response.headers['Access-Control-Allow-Origin'] = '*'
     if file_format == 'image':
         # 이미지 결과 로직 및 템플릿 렌더링
         return render_template('result_image.html',output_path = output_path)
     elif file_format == 'video':
         # 비디오 결과 로직 및 템플릿 렌더링
-        return render_template('result_video.html',output_path = output_path)
+        redis_client.set('output_path',output_path)
+        return render_template('result_video2.html')
+        # return render_template('result_video2.html',output_path = output_path)
     else:
-        return render_template('error_handle.html', message='Invalid file type')
+        return render_template('error_handle.html', message='Invalid file type')    
 
 @app.route('/loading',methods=['GET'])
 def loading():
@@ -687,15 +707,15 @@ def loading():
             #     inference_thread = threading.Thread(target = thread_predict_video_with_onnx,args = (filename,filepath, 'YOLOv8m',))
             #     inference_thread.start()
             #     return redirect(url_for('loading',output_path = output_path, file_format = file_format,init='1'))
-            # else:
-            #     output_path = "outputs/"+filename
-            #     inference_thread = threading.Thread(target = thread_predict_video_with_yolo_pt,args = (filename,filepath, 'YOLOv8m',))
-            #     inference_thread.start()
-            #     return redirect(url_for('loading',output_path = output_path, file_format = file_format,init='1'))
             else:
-                redis_client.set('filename', filename)
-                return render_template('result_video2.html')
-                # return redirect(url_for('video',filename = filename))
+                output_path = "outputs/"+filename
+                inference_thread = threading.Thread(target = thread_predict_video_with_yolo_pt,args = (filename,filepath, 'YOLOv8m',))
+                inference_thread.start()
+                return redirect(url_for('loading',output_path = output_path, file_format = file_format,init='1'))
+            # else:
+            #     redis_client.set('filename', filename)
+            #     return render_template('result_video2.html')
+            #     # return redirect(url_for('video',filename = filename))
             
         except Exception as e:
             return render_template('error_handle.html', message=str(e))  
@@ -709,15 +729,24 @@ def loading():
         else:
             return render_template('loading.html', init='1', progress=progress,file_format = file_format,output_path = output_path)
 
+
 @app.route('/video')
 def video():
-    filename = redis_client.get('filename')
-    return Response(generate_frames_yolo_onnx(filename), mimetype='multipart/x-mixed-replace; boundary=frame')
+    file_path = 'static/'+ redis_client.get('output_path')
+    print(file_path)
+    return send_file(file_path, mimetype='video/mp4')
 
-# @app.route('/get_progress')
-# def endpoint_get_progress():
-#     progress = get_progress()
-#     return jsonify({'progress': progress})
+
+
+# @app.route('/video')
+# def video():
+#     filename = redis_client.get('filename')
+#     return Response(generate_frames_yolo_onnx(filename), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/get_progress')
+def endpoint_get_progress():
+    progress = get_progress()
+    return jsonify({'progress': progress})
 
 # @app.route('/data_upload', methods=['POST'])
 # def data_upload():
