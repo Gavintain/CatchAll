@@ -5,3 +5,9 @@ flask-socketio
 flask_cors
 gunicorn
 psycopg2-binary
+Pillow
+numpy
+onnx
+onnxruntime
+opencv-python
+matplotlib

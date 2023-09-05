@@ -10,7 +10,13 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     liblzma-dev \
     zlib1g-dev \
-    libgl1-mesa-glx
+    libgl1-mesa-glx \
+    postgresql \ 
+    redis-server 
+
+
+# # 설정: 대화식 프롬프트 무시
+# ENV DEBIAN_FRONTEND=noninteractive
 
 # 작업 디렉토리 생성
 WORKDIR /app
@@ -20,15 +26,7 @@ COPY . /app
 
 # 필요한 종속성 설치
 # RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-RUN sudo apt-get update
-RUN sudo apt-get install postgresql
-RUN sudo apt install redis-server
-
 RUN pip install -r requirements.txt
-
-FROM postgres:latest
-FROM redis:latest
-
 
 # PostgreSQL 서버 초기화 SQL 파일 복사
 COPY init.sql /docker-entrypoint-initdb.d/

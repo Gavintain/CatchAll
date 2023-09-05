@@ -2,23 +2,24 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify,se
 from flask_redis import FlaskRedis
 from flask_cors import CORS
 import redis
-# from gunicorn.app.base import Application
+from gunicorn.app.base import Application
 from werkzeug.utils import secure_filename
 from werkzeug.local import LocalProxy, LocalStack
 import psycopg2
 import os,io,threading,time,random
 import json
 import PIL
-from PIL import Image
+from PIL import Image,ImageFont,ImageDraw
 import subprocess
 import cv2.dnn
 import numpy as np
 from matplotlib import pyplot as plt
 import base64
+import onnxruntime
 
-import torch
-import ultralytics
-from ultralytics import YOLO
+# import torch
+# import ultralytics
+# from ultralytics import YOLO
 
 
 ERRFILESIZE = "파일크기가 200MB보다 작아야합니다."
@@ -60,12 +61,12 @@ def set_progress(progress):
 def get_progress():
     return int(redis_client.get('progress'))
 
-# class FlaskGunicornApp(Application):
-#     def init(self, parser, opts, args):
-#         pass
+class FlaskGunicornApp(Application):
+    def init(self, parser, opts, args):
+        pass
 
-#     def load(self):
-#         return app
+    def load(self):
+        return app
 
 def database_initialize(db_info):
     try:
@@ -426,6 +427,89 @@ def Yolo_onnx_image_inference(model:cv2.dnn.Net, img, conf=0.25, nms_th=0.8):
     result = np.asarray(img)
     return result, infer_time
 
+def Yolo_onnx_runtime_inference(model, img, conf=0.25, nms_th=0.8):
+    """
+    ONNX 모델 받아서 추론 (ONNX runtime 버전)
+
+    returns:
+        result : bbox표기된 이미지 (width, height, RGB)
+        infer_time : 추론시간 (ms)
+    """
+    LABEL_NAMES = ['인도', '횡단보도', '자전거 도로', '교차로', '중앙 차선', '안전지대',
+              '정지선', '정지선 위반 판별구역', '보행자 신호등 녹색', '보행자 신호등 적색',
+              '차량 신호등 녹색', '차량 신호등 적색', '오토바이', '오토바이_보행자도로 통행위반',
+              '오토바이_안전모 미착용', '오토바이_무단횡단', '오토바이_신호위반', '오토바이_정지선위반',
+              '오토바이_횡단보도 주행위반', '자전거', '자전거 캐리어', '자전거_보행자도로 통행위반',
+              '자전거_안전모 미착용', '자전거_무단횡단', '자전거_신호위반', '자전거_정지선위반',
+              '자전거_횡단보도 주행위반', '킥보드', '킥보드 캐리어', '킥보드_보행자도로 통행위반',
+              '킥보드_안전모 미착용', '킥보드_무단횡단', '킥보드_신호위반', '킥보드_횡단보도 주행위반',
+              '킥보드_동승자 탑승위반']
+    
+    COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255),
+          (0, 255, 255), (255, 128, 0), (128, 0, 255), (0, 255, 128), (255, 128, 128),
+          (128, 255, 128), (128, 128, 255), (128, 128, 0), (128, 0, 128), (0, 128, 128),
+          (192, 64, 0), (192, 192, 64), (64, 192, 192), (64, 64, 192), (192, 64, 192),
+          (64, 192, 64), (255, 192, 128), (128, 255, 192), (128, 192, 255)]
+    
+    CLASS_NAMES = LABEL_NAMES[12:]
+    [height, width, _] = img.shape
+    length = max((height, width))
+    resized_img = np.zeros((length, length, 3), np.float32)
+    resized_img[0:height, 0:width] = img / 255
+    resized_img = cv2.resize(resized_img, (640,640))[np.newaxis,...].transpose(0, 3, 1, 2)
+    scale = length / 640
+
+    input_name = model.get_inputs()[0].name
+
+    # 출력 형태 (batch, 27, 8400)
+    # 여기서 27은 차례대로 bbox좌표4개(x,y,w,h) + 클래스 23개
+    # bbox의 숫자 8400개
+    t1 = time.time()
+    outputs = model.run(None, {input_name:resized_img})
+    t2 = time.time()
+    infer_time = round((t2-t1)*1000, 2)
+    # 출력형태 (8400, 27)로 변환 후 agnostic NMS 진행
+    outputs = outputs[0].transpose().squeeze()
+
+    boxes = []
+    cls_ids = []
+    scores = []
+    # 기준신뢰도 이상의 box만 추출
+    for row in outputs:
+        cls_score = row[4:]
+        x, y, w, h = row[:4]
+        # 최대 최소 및 최대 index 구하기
+        minScore, maxScore, (_, minClassLoc), (_, maxClassIndex) = cv2.minMaxLoc(cls_score)
+        if maxScore <= conf: # 기준 신뢰도 이하면 버리고 다음 row
+            continue
+        # left, top, width, height로 변환 (NMSBoxes input format)
+        x1, y1= x-(0.5*w), y-(0.5*h)
+        boxes.append([x1,y1,w,h])
+        scores.append(maxScore)
+        cls_ids.append(maxClassIndex)
+
+    # agnostic NMS (선택된 bbox index list출력)
+    nms_indices = cv2.dnn.NMSBoxes(boxes, scores, conf, nms_th)
+
+    # 선택된 bbox 그리기 (cv2는 한글폰트 적용 x => PIL 사용)
+    img = PIL.Image.fromarray(img[..., ::-1])
+    font = PIL.ImageFont.truetype("static/assets/font/batang.ttc", 30)
+    draw = PIL.ImageDraw.Draw(img, 'RGB')
+    for idx in nms_indices:
+        cls_name = CLASS_NAMES[cls_ids[idx]]
+        score = scores[idx]
+        x1, y1, w, h = np.array(boxes[idx]) * scale # 640*640에 원본스케일 곱하기
+        color = COLORS[cls_ids[idx]]
+
+        draw.rectangle((x1,y1,x1+w,y1+h), outline=color, width=5)
+        tbbox = draw.textbbox([x1, y1-30], f'{score:.2f} '+cls_name, font=font)
+        draw.rectangle(tbbox, fill=color)
+        draw.text([x1, y1-30], f'{score:.2f} '+cls_name, font=font, fill='black')
+
+    # 640*640*RGB 행렬 반환
+    result = np.asarray(img)
+    return result, infer_time
+
 def image_to_base64(image_data):
     image_pil = Image.fromarray(image_data)
     image_bytes = io.BytesIO()
@@ -500,7 +584,6 @@ def thread_predict_video_with_onnx(file_name,video_path,model_name):
     frame_rate = int(cap.get(cv2.CAP_PROP_FPS))
     total_time = total_frames / frame_rate
 
-
     # 동영상 저장을 위한 설정
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     output_video = cv2.VideoWriter(save_base_dir + file_name, fourcc, 30, (int(cap.get(3)), int(cap.get(4))))
@@ -517,19 +600,8 @@ def thread_predict_video_with_onnx(file_name,video_path,model_name):
         if success:
             results, infer_time = Yolo_onnx_image_inference(onnx_model, frame, conf=0.2)
 
-            # cv2.namedWindow('YOLOv8m Tracking', cv2.WINDOW_NORMAL)
-            # cv2.imshow("YOLOv8m Tracking", results[..., ::-1])  # RGB => BGR
-            # print(f'추론시간 {infer_time}ms')
-
             # 결과 프레임을 동영상으로 저장
             output_video.write(results)
-
-            # 키보드 q 누르면 중간 종료
-            # if cv2.waitKey(1) & 0xFF == ord("q"):
-            #     cv2.destroyAllWindows()
-            #     cap.release()
-            #     output_video.release()
-            #     break
 
         # 프레임 전부 읽어들이면 종료
         else:
@@ -542,38 +614,92 @@ def thread_predict_video_with_onnx(file_name,video_path,model_name):
     print('predict successful')
     return save_base_dir + file_name, infer_time
 
-def thread_predict_video_with_yolo_pt(file_name,video_path,model_name):
-    model_path = 'datasets/sample/model/' + model_name + '.pt'
-    model = YOLO(model_path)
+def thread_predict_image_with_onnx_runtime(file_name,image_path,model_name):
+    model_path = 'datasets/sample/model/' + model_name + '.onnx'
+    onnx_model =  onnxruntime.InferenceSession(model_path)
+    output_path = 'static/outputs/' + file_name
+    test_img = cv2.imread(image_path)
+    set_progress(10)
+    result, infer_time = Yolo_onnx_runtime_inference(onnx_model, test_img, conf=0.5)
+    cv2.imwrite(output_path,result)
+    print('predict successful')
+    set_progress(100)
+    return result, infer_time
+
+def thread_predict_video_with_onnx_runtime(file_name,video_path,model_name):
+    model_path = 'datasets/sample/model/' + model_name + '.onnx'
+    onnx_model =  onnxruntime.InferenceSession(model_path)
     save_base_dir = 'static/outputs/'
 
-    # 동영상 저장을 위한 설정
+    # 비디오 파일 열기
     cap = cv2.VideoCapture(video_path)
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_rate = int(cap.get(cv2.CAP_PROP_FPS))
+    total_time = total_frames / frame_rate
+
+    # 동영상 저장을 위한 설정
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     output_video = cv2.VideoWriter(save_base_dir + file_name, fourcc, 30, (int(cap.get(3)), int(cap.get(4))))
-    cap.release()
 
-    progress = 10
-    set_progress(progress)
-    detection_results = model.predict(source=video_path,device = 'cpu')
-    # img_num = len(detection_results)
-    # count = 10
-    # progress = int(count/(img_num+11))
-    progress = 70
-    set_progress(progress)
-    for r in detection_results:
-        # count+=1
-        # progress = int(count/(img_num+11))
-        # set_progress(progress)
-        im_array = r.plot()  # plot a BGR numpy array of predictions
-        im = Image.fromarray(im_array[..., ::-1])  # RGB PIL image
-        im_cv2 = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
-        output_video.write(im_cv2)
-    output_video.release()
+    while cap.isOpened():
+        # 프레임 읽기
+        success, frame = cap.read()
+
+        # 현재 진행률 계산
+        current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        set_progress(int((current_frame / total_frames) * 100))
+
+        # 성공시 프레임 추론
+        if success:
+            results, infer_time = Yolo_onnx_runtime_inference(onnx_model, frame, conf=0.2)
+
+            # 결과 프레임을 동영상으로 저장
+            output_video.write(results)
+
+        # 프레임 전부 읽어들이면 종료
+        else:
+            cv2.destroyAllWindows()
+            cap.release()
+            output_video.release()
+            break
 
     set_progress(100)
     print('predict successful')
-    return save_base_dir + file_name
+    return save_base_dir + file_name, infer_time
+
+# def thread_predict_video_with_yolo_pt(file_name,video_path,model_name):
+#     model_path = 'datasets/sample/model/' + model_name + '.pt'
+#     model = YOLO(model_path)
+#     save_base_dir = 'static/outputs/'
+
+#     # 동영상 저장을 위한 설정
+#     cap = cv2.VideoCapture(video_path)
+#     fourcc = cv2.VideoWriter_fourcc(*'XVID')
+#     output_video = cv2.VideoWriter(save_base_dir + file_name, fourcc, 30, (int(cap.get(3)), int(cap.get(4))))
+#     cap.release()
+
+#     progress = 10
+#     set_progress(progress)
+#     detection_results = model.predict(source=video_path,device = 'cpu')
+#     # img_num = len(detection_results)
+#     # count = 10
+#     # progress = int(count/(img_num+11))
+#     progress = 70
+#     set_progress(progress)
+#     for r in detection_results:
+#         # count+=1
+#         # progress = int(count/(img_num+11))
+#         # set_progress(progress)
+#         im_array = r.plot()  # plot a BGR numpy array of predictions
+#         im = Image.fromarray(im_array[..., ::-1])  # RGB PIL image
+#         im_cv2 = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+#         output_video.write(im_cv2)
+#     output_video.release()
+
+#     set_progress(100)
+#     print('predict successful')
+#     return save_base_dir + file_name
 
 # def generate_frames_yolo_pt(filename):
 #     cap = cv2.VideoCapture(filename)
@@ -654,22 +780,6 @@ def data():
 def taskdata():
     return render_template('old/taskdata.html')
 
-
-# @app.route('/result')
-# def result():
-#     file_format = request.args.get('file_format')
-#     output_path = request.args.get('output_path')
-#     response = make_response(send_from_directory('static', output_path))
-#     response.headers['Access-Control-Allow-Origin'] = '*'
-#     if file_format == 'image':
-#         # 이미지 결과 로직 및 템플릿 렌더링
-#         return render_template('result_image.html',output_path = output_path)
-#     elif file_format == 'video':
-#         # 비디오 결과 로직 및 템플릿 렌더링
-#         return render_template('result_video.html',output_path = output_path)
-#     else:
-#         return render_template('error_handle.html', message='Invalid file type')
-
 @app.route('/result')
 def result():
     file_format = request.args.get('file_format')
@@ -699,7 +809,7 @@ def loading():
         try:
             if file_format == 'image':
                 output_path = "outputs/"+filename
-                inference_thread = threading.Thread(target = thread_predict_image_with_onnx,args = (filename,filepath, 'YOLOv8m',))
+                inference_thread = threading.Thread(target = thread_predict_image_with_onnx_runtime,args = (filename,filepath, 'YOLOv8m',))
                 inference_thread.start()
                 return redirect(url_for('loading',output_path = output_path, file_format = file_format,init='1'))
             # else:
@@ -707,15 +817,16 @@ def loading():
             #     inference_thread = threading.Thread(target = thread_predict_video_with_onnx,args = (filename,filepath, 'YOLOv8m',))
             #     inference_thread.start()
             #     return redirect(url_for('loading',output_path = output_path, file_format = file_format,init='1'))
+            # else:
+            #     output_path = "outputs/"+filename
+            #     inference_thread = threading.Thread(target = thread_predict_video_with_yolo_pt,args = (filename,filepath, 'YOLOv8m',))
+            #     inference_thread.start()
+            #     return redirect(url_for('loading',output_path = output_path, file_format = file_format,init='1'))
             else:
                 output_path = "outputs/"+filename
-                inference_thread = threading.Thread(target = thread_predict_video_with_yolo_pt,args = (filename,filepath, 'YOLOv8m',))
+                inference_thread = threading.Thread(target = thread_predict_video_with_onnx_runtime,args = (filename,filepath, 'YOLOv8m',))
                 inference_thread.start()
                 return redirect(url_for('loading',output_path = output_path, file_format = file_format,init='1'))
-            # else:
-            #     redis_client.set('filename', filename)
-            #     return render_template('result_video2.html')
-            #     # return redirect(url_for('video',filename = filename))
             
         except Exception as e:
             return render_template('error_handle.html', message=str(e))  
@@ -729,19 +840,11 @@ def loading():
         else:
             return render_template('loading.html', init='1', progress=progress,file_format = file_format,output_path = output_path)
 
-
 @app.route('/video')
 def video():
     file_path = 'static/'+ redis_client.get('output_path')
     print(file_path)
     return send_file(file_path, mimetype='video/mp4')
-
-
-
-# @app.route('/video')
-# def video():
-#     filename = redis_client.get('filename')
-#     return Response(generate_frames_yolo_onnx(filename), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/get_progress')
 def endpoint_get_progress():
@@ -818,12 +921,12 @@ if __name__ == '__main__':
     }
     app_initialize(DB_postgresql)
 
-    # options = {
-    #     'workers': 4,          # 워커 프로세스 수
-    #     'bind': '0.0.0.0:8000',# 바인딩 주소와 포트
-    #     'timeout': 100,         # 워커 타임아웃 설정 (단위: 초)
-    # }
-    # FlaskGunicornApp().run(**options)
+    options = {
+        'workers': 4,          # 워커 프로세스 수
+        'bind': '127.0.0.1:8000',# 바인딩 주소와 포트
+        'timeout': 100,         # 워커 타임아웃 설정 (단위: 초)
+    }
+    FlaskGunicornApp().run(**options)
     # app.run(debug=True, host=DB_postgresql['host'])
     app.run(debug=True, host=DB_postgresql['host'])
 
